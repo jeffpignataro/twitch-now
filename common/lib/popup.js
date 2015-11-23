@@ -3,6 +3,7 @@
 
   var app = window.app = _.extend({}, Backbone.Events);
   var b = app.b = utils._getBackgroundPage();
+  var _baron;
 
   app.twitchApi = b.twitchApi;
   app.currentView = null;
@@ -11,6 +12,7 @@
 
   app.resetScroll = function (){
     app.container.scrollTop(0);
+    _baron.update();
   }
 
   app.lazyload = function (){
@@ -49,6 +51,8 @@
   app.init = function (){
     app.container = $('#content');
     app.scroller = app.container.find(".scroller");
+    app._scroller = document.querySelector(".scroller");
+    app.scrollerBar = document.querySelector(".scroller__bar");
     app.preloader = $("<div id='preloader'><img src='../img/spinner.gif'/></div>");
     app.streamPreloader = $("<div id='preloader-stream'><img src='../img/spinner.gif'/></div>");
 
@@ -59,11 +63,20 @@
     var views = app.views;
     this.router = new this.Router;
 
+
+    app.scroller.on("scroll", function (){
+      if ( app._scroller.scrollTop + app._scroller.offsetHeight == app._scroller.scrollHeight ) {
+        if ( app.curView && app.curView.loadNext && $("#filterInput").val().length == 0 ) {
+          app.curView.loadNext();
+        }
+      }
+    })
+
     views.menu = new Menu;
 
     views.topMenu = new TopMenu;
 
-    var _baron = baron({
+    _baron = baron({
       root    : '#content',
       scroller: '.scroller',
       bar     : '.scroller__bar',
@@ -183,10 +196,14 @@
     onhide       : function (){
 
     },
+    onunload     : function (){
+
+    },
     initialize   : function (){
       $(self).unload(function (){
         this.undelegateEvents();
         this.stopListening();
+        this.onunload();
       }.bind(this));
     },
     showPreloader: function (){
@@ -202,7 +219,6 @@
     lazyrender: function (){
       if ( !this.isRendered ) {
         this.render();
-        console.log("\nLazyrender called");
         this.isRendered = true;
       }
     }
@@ -214,7 +230,7 @@
       "click #logout-btn": "logout",
       "click #login-btn" : "login"
     },
-    template  : "user.html",
+    template  : "user",
     initialize: function (){
       DefaultView.prototype.initialize.apply(this, arguments);
       this.listenTo(this.model, "change", this.render);
@@ -231,8 +247,8 @@
   var TopMenu = DefaultView.extend({
     el            : "#top-menu",
     events        : {
-      "click #refresh-btn": "refresh",
-      "keyup #filterInput": "filter"
+      "click #refresh-btn"  : "refresh",
+      "keyup #filterInput"  : "filter"
     },
     show          : function (){
       this.$el.show();
@@ -242,20 +258,22 @@
     },
     initialize    : function (){
       DefaultView.prototype.initialize.apply(this, arguments);
+      this.$filterInput = this.$("#filterInput");
       this.listenTo(this.app.router, "route", this.resetFilterVal);
     },
     resetFilterVal: function (){
-      this.$("#filterInput").val("").keyup();
+      this.$filterInput.val("").keyup();
       this.filter();
     },
     filter        : function (){
-      var fValue = this.$("#filterInput").val().toLowerCase();
+      var fValue = this.$filterInput.val().toLowerCase();
       fValue = fValue.replace(/([.?*+^$[\]\\(){}|-])/g, "\\$1");
       var rFilter = new RegExp(fValue);
       if ( this.app.curView ) {
         this.app.curView.$el.find(".js-filterable").each(function (i, e){
           $(e).toggle(!!$(e).text().toLowerCase().match(rFilter));
         });
+        _baron.update();
       }
     },
     refresh       : function (){
@@ -289,7 +307,7 @@
   var InfoView = DefaultView.extend({});
 
   var ControlView = DefaultView.extend({
-    template: "control.html"
+    template: "control"
   });
 
   var SettingsView = LazyRenderView.extend({
@@ -332,11 +350,11 @@
     },
 
     uploadSound: function (e){
-      utils.tabs.create({url: utils.runtime.getURL("common/html/upload.html")});
+      utils.tabs.create({url: utils.runtime.getURL("common/html/upload")});
     },
 
     playSound  : function (e){
-      b.bgApp.playSound(b.settings.getNotificationSoundSource());
+      b.bgApp.playSound(b.settings.getNotificationSoundSource(), b.settings.get("notificationVolume").get("value") / 100);
     },
     rangeHelper: function (e){
       var t = $(e.target);
@@ -390,7 +408,7 @@
   });
 
   var GameView = DefaultView.extend({
-    template: "game.html",
+    template: "game",
     events  : {
       "contextmenu .stream": "showMenu"
     },
@@ -419,7 +437,7 @@
         model: m
       })
 
-      menu.showMenu("contextgamemenu.html", {y: e.clientY, x: e.clientX});
+      menu.showMenu("contextgamemenu", {y: e.clientY, x: e.clientX});
 
       menu.$el
         .on('click', '.js-follow-game', function (){
@@ -464,12 +482,12 @@
   })
 
   var VideoView = DefaultView.extend({
-    template: "video.html"
+    template: "video"
   });
 
 
   var StreamView = DefaultView.extend({
-    template  : "stream.html",
+    template  : "stream",
     menuEl    : '#context-menu',
     events    : {
       "contextmenu .stream": "showMenu",
@@ -489,11 +507,14 @@
       var menu = new MenuView({
         model: m
       })
-      menu.showMenu("contextstreammenu.html", {y: e.clientY, x: e.clientX});
+      menu.showMenu("contextstreammenu", {y: e.clientY, x: e.clientX});
 
       menu.$el
         .on('click', '.js-open-chat', function (){
           self.model.openChat();
+        })
+        .on('click', '.js-open-in-multitwitch', function (){
+          self.model.openMultitwitch();
         })
         .on('click', '.js-open-stream', function (e){
           self.model.openStream($(e.target).attr("data-type"));
@@ -528,7 +549,7 @@
   });
 
   var ListView = LazyRenderView.extend({
-    template   : "screenmessage.html",
+    template   : "screenmessage",
     messages   : {
       "auth"           : {
         text: "__MSG_m73__"
@@ -560,35 +581,46 @@
       this.container = opts.container || this.$el.find(".screen-content");
       this.listenTo(this.collection, "add update sort remove reset", this.render);
       this.listenTo(this.collection, "_error", this.showMessage.bind(this));
-//      this.render();
+      this.listenTo(this.collection, "addarray", this.render.bind(this));
+    },
+    onunload   : function (){
+      this.collection.trigger('unload');
     },
     showMessage: function (type){
-      console.log("\nShowing message. Type  = ", type);
-      console.log("\nShowing messages", this.messages);
       if ( this.messages[type] ) {
         var text = this.messages[type];
         this.container.empty().html(Handlebars.templates[this.template](text));
       }
     },
+    loadNext   : function (){
+      if ( this.collection.loadNext ) {
+        this.collection.loadNext();
+      }
+    },
     update     : function (){
       this.container.empty().append(this.app.preloader);
-      this.collection.updateData();
+      this.collection.update();
     },
-    render     : function (){
-      if ( this.collection.lastErrorMessage ) {
-        this.container.empty();
-        this.showMessage(this.collection.lastErrorMessage);
+    render     : function (models){
+      //if ( this.collection.lastErrorMessage ) {
+      //  this.container.empty();
+      //  this.showMessage(this.collection.lastErrorMessage);
+      //} else {
+      var elementsToRender = models ? models : this.collection;
+      var views = elementsToRender.map(function (item){
+        return new this.itemView({model: item}).render().$el;
+      }, this);
+      if ( models ) {
+        this.container.append($(document.createDocumentFragment()).html(views));
       } else {
-        var views = this.collection.map(function (item){
-          return new this.itemView({model: item}).render().$el;
-        }, this);
         this.container.empty().html(views);
       }
+      //}
     }
   });
 
   var ChannelNotificationView = DefaultView.extend({
-    template   : "channelnotification.html",
+    template   : "channelnotification",
     events     : {
       "click .channel-logo": "openProfile"
     },
@@ -598,45 +630,44 @@
   })
 
   var ChannelNotificationListView = ListView.extend({
-    itemView    : ChannelNotificationView,
-    events      : {
+    itemView      : ChannelNotificationView,
+    events        : {
       "click .undo-message a"       : "undo",
       "change .screen-content input": "serialize",
       "click .dropdown-menu a"      : "toggle"
     },
-    initialize  : function (){
+    initialize    : function (){
       this.$undoMessage = this.$el.find(".undo-message");
       this.$selectMenuBtn = this.$el.find(".dropdown .btn");
-      this.listenTo(this.collection, "add update remove reset", this.updateMenuUI.bind(this));
-      this.updateMenuUI();
+      this.listenTo(this.collection, "add update remove reset", this.toggleDropdown.bind(this));
+      this.toggleDropdown();
       ListView.prototype.initialize.apply(this, arguments);
     },
-    updateMenuUI: function (){
-      console.log("\nUpdating menu ui");
+    toggleDropdown: function (){
       this.$selectMenuBtn.toggleClass("disabled", this.collection.length == 0);
     },
-    update      : function (){
+    update        : function (){
       this.$selectMenuBtn.addClass("disabled");
       this.$undoMessage.css({visibility: "hidden"});
       ListView.prototype.update.apply(this, arguments);
     },
-    onhide      : function (){
+
+    onhide   : function (){
       this.$undoMessage.css({visibility: "hidden"});
     },
-    onshow      : function (){
+    onshow   : function (){
       //update once on view show if not updated before
       if ( !this.collection.length ) {
         this.update();
       }
     },
-    undo        : function (){
+    undo     : function (){
       this.collection.restore();
       this.$undoMessage.css({visibility: "hidden"});
     },
-    toggle      : function (e){
+    toggle   : function (e){
       var type = $(e.currentTarget).data("notification-type");
       var val = $(e.currentTarget).data("notification-value") == "1" ? true : false;
-
       this.$el
         .find(".screen-content input[data-notification-type='" + type + "']")
         .prop("checked", val);
@@ -645,7 +676,7 @@
       this.collection.store();
       this.serialize();
     },
-    serialize   : function (){
+    serialize: function (){
       var attributes = [];
       this.$el.find(".screen-content [data-channel-id]")
         .map(function (i, e){
@@ -691,13 +722,14 @@
   var VideoListView = ListView.extend({
     itemView : VideoView,
     setStream: function (channel){
+      this.lazyrender();
       this.collection.channel = channel;
       this.update();
     }
   });
 
   var ExtendedGameView = DefaultView.extend({
-    template          : "gameextended.html",
+    template          : "gameextended",
     events            : {
       "click .game-follow": "follow"
     },
@@ -763,6 +795,10 @@
         $("#content").css({top: 31});
       }
     },
+    loadNext        : function (){
+      this.videoView.loadNext();
+      this.streamView.loadNext();
+    },
     toggleActiveView: function (game, view){
       this.$el.find(".tabs [tab-id]").hide();
       this.$el.find(".tabs [tab-id='" + view + "']").show();
@@ -772,14 +808,13 @@
       this.videoView.update();
       this.streamView.update();
     },
-
-    setGame: function (game){
+    setGame         : function (game){
       this.model.setGame(game);
     }
   })
 
   var DonationView = DefaultView.extend({
-    template: "donation.html"
+    template: "donation"
   });
 
   var DonationListView = DefaultView.extend({
@@ -798,7 +833,7 @@
   });
 
   var ContributorView = DefaultView.extend({
-    template: "contributor.html"
+    template: "contributor"
   });
 
   var ContributorListView = DefaultView.extend({

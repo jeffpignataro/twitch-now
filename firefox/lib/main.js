@@ -51,12 +51,16 @@ scripts = scripts.map(function (v){
   return self.data.url("common/" + v);
 })
 
+pageMod.PageMod({
+  contentScriptWhen: "start",
+  include          : ["*.twitch.tv"],
+  contentScriptFile: self.data.url("common/content/theatre-mode.js")
+});
+
 var panel = panels.Panel({
   contentURL          : self.data.url("common/html/popup.html"),
   width               : 440,
   height              : 590,
-  contextMenu         : true,
-  focus               : false,
   onHide              : onPanelHide,
   contentScriptFile   : scripts,
   contentScriptOptions: {
@@ -100,6 +104,10 @@ panel.port.on("OAUTH2_TOKEN", function (){
 });
 
 panel.port.on("XHR_PROXY", function (xhr){
+
+  if ( !xhr || !xhr.method ) {
+    return;
+  }
 
   var method = xhr.method.toLowerCase();
 

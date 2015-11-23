@@ -82,5 +82,9 @@
     "m81": { "message" : "Followed games"},
     "m82": { "message" : "game"},
     "m83": { "message" : "follow game"},
-    "m84": { "message" : "unfollow game"}
+    "m84": { "message" : "unfollow game"},
+    "m85": { "message" : "Manage notifications"},
+    "m86": { "message" : "Notification volume"},
+    "m87": { "message" : "watch on Multitwitch.tv"},
+    "m88": { "message" : "open in newtab with activated theatre mode"}
 }

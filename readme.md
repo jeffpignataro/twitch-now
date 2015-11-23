@@ -7,7 +7,7 @@
 ## Requirements
 
 * Node.js
-* Grunt
+* Gulp
 
 ## How to build
 
@@ -18,22 +18,22 @@ $ npm install
 
 To build Chrome version:
 ```
-$ grunt chrome
+$ gulp chrome
 ```
 
 To build Firefox version:
 ```
-$ grunt firefox
+$ gulp firefox
 ```
 
 To run Firefox version:
 ```
-$ grunt mozilla-cfx
+$ cd builds/firefox && jpm run
 ```
 
 To build Opera version:
 ```
-$ grunt opera
+$ gulp opera
 ```
 
 ## Translation guide

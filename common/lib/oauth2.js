@@ -3,11 +3,21 @@
   var that = {};
   var isFirefox = !!root.require;
   var localStorage = isFirefox ? require("sdk/simple-storage").storage : root.localStorage;
+  var EventEmitter = isFirefox ? require("./eventemitter.js") : root.EventEmitter;
 
   function noop(){
   }
 
   that._adapters = {};
+
+  function extend(){
+    var s = arguments[0];
+    for ( var i = 1; i < arguments.length; i++ ) {
+      for ( var j in arguments[i] ) {
+        s[j] = arguments[i][j];
+      }
+    }
+  }
 
   var request = function (opts, callback){
     if ( root.require ) {
@@ -54,6 +64,7 @@
     this.flow = flow;
     this.codeUrl = opts.api + "?" + this.query(opts);
     this._watchInject();
+    extend(this, new EventEmitter());
     if ( !isFirefox ) {
       this.syncGet();
       this.sync();
@@ -72,7 +83,7 @@
 
       console.log("\n\n\nInjecting\n\n\n");
       pageMode.PageMod({
-        include          : ["https://" + injectTo , "http://" + injectTo ],
+        include          : ["https://" + injectTo, "http://" + injectTo],
         contentScript    : injectScript,
         contentScriptWhen: "ready",
         attachTo         : "top",
@@ -165,18 +176,18 @@
   }
 
   Adapter.prototype.get = function (){
-    return  typeof localStorage[ this.lsPath ] != "undefined" ?
-      JSON.parse(localStorage[ this.lsPath ]) :
+    return typeof localStorage[this.lsPath] != "undefined" ?
+      JSON.parse(localStorage[this.lsPath]) :
       undefined;
   }
 
   Adapter.prototype.set = function (val, passSync){
-    localStorage[ this.lsPath ] = JSON.stringify(val);
+    localStorage[this.lsPath] = JSON.stringify(val);
 
 
     if ( !isFirefox && passSync == undefined ) {
       var syncData = {};
-      syncData[ this.lsPath ] = JSON.stringify(val);
+      syncData[this.lsPath] = JSON.stringify(val);
 
       console.log("set sync data", syncData);
 
@@ -186,13 +197,13 @@
     }
 
     if ( !isFirefox ) {
-      chrome.runtime.sendMessage({id: "OAUTH2_TOKEN", value: twitchOauth.getAccessToken()});
+      this.trigger("OAUTH2_TOKEN", {value: this.getAccessToken()});
     }
   }
 
   Adapter.prototype.updateLocalStorage = function (){
     var stored = this.get();
-    stored = stored || { accessToken: "" };
+    stored = stored || {accessToken: ""};
     stored.accessToken = stored.accessToken || "";
     this.set(stored);
   }
@@ -283,7 +294,7 @@
     data["code"] = authorizationCode;
     data["client_secret"] = this.secret;
 
-    var values = this.pick(data, ["client_id", "client_secret", "grant_type", "redirect_uri", "code" ]);
+    var values = this.pick(data, ["client_id", "client_secret", "grant_type", "redirect_uri", "code"]);
 
     request({url: url, method: method, data: values}, callback)
   }

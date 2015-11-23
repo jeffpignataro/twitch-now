@@ -23,7 +23,8 @@
     if ( isFirefox ) {
       self.port.emit("OAUTH2_AUTH");
     } else {
-      chrome.runtime.sendMessage({id: "OAUTH2_AUTH"});
+      twitchOauth.authorize(function (){
+      })
     }
   }
 
@@ -32,7 +33,7 @@
       if ( isFirefox ) {
         self.port.emit("OAUTH2_REVOKE");
       } else {
-        chrome.runtime.sendMessage({id: "OAUTH2_REVOKE"});
+        twitchOauth.clearAccessToken();
       }
     }
   }
@@ -42,7 +43,7 @@
       timeout : this.timeout,
       dataType: "json",
       headers : {
-        "Accept"       : "application/vnd.twitchtv.v2+json",
+        "Accept"       : "application/vnd.twitchtv.v3+json",
         "Client-ID"    : this.clientId,
         "Authorization": " OAuth " + this.token
       }
@@ -56,13 +57,7 @@
     this.on("tokenchange", function (accessToken){
       _self.token = accessToken;
       if ( accessToken ) {
-        _self.getUserName(function (err){
-          if ( err ) {
-            console.log("getusername failed", err);
-          } else {
-            _self.trigger("authorize");
-          }
-        })
+        _self.trigger("authorize");
       } else {
         _self.userName = "";
         _self.trigger("revoke");
@@ -75,12 +70,9 @@
       })
       self.port.emit("OAUTH2_TOKEN");
     } else {
-      chrome.runtime.onMessage.addListener(function (msg){
-        if ( msg.id == "OAUTH2_TOKEN" ) {
-          _self.trigger("tokenchange", msg.value);
-        }
+      twitchOauth.on("OAUTH2_TOKEN", function (){
+        _self.trigger("tokenchange", twitchOauth.getAccessToken());
       })
-      chrome.runtime.sendMessage({id: "OAUTH2_TOKEN_GET"});
     }
   }
 
@@ -137,6 +129,20 @@
       requestOpts = $.extend(true, requestOpts, {data: opts}, _self.getRequestParams());
       $.ajax(requestOpts)
         .done(function (data){
+          //workaround for inconsistent API preview returns
+          if ( /^(streams|searchStreams|followed)$/.test(methodName) ) {
+            if ( data.streams && data.streams.length ) {
+              data.streams = data.streams.map(function (s){
+                if ( s.preview && typeof s.preview == "string" ) {
+                  var medium = s.preview;
+                  s.preview = {
+                    medium: medium
+                  }
+                }
+                return s;
+              })
+            }
+          }
           _self.trigger("done:" + methodName);
           cb(null, data);
         })

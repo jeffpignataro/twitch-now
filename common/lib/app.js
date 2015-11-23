@@ -95,7 +95,7 @@
             type   : "basic",
             title  : streamsToShow[0].get("channel").display_name,
             message: streamsToShow[0].get("game"),
-            iconUrl: streamsToShow[0].get("preview")
+            iconUrl: streamsToShow[0].get("preview").medium
           }
 
           bgApp.notificationIds[notificationId] = streamsToShow[0];
@@ -151,8 +151,9 @@
     return audioSupported.val;
   };
 
-  bgApp.playSound = function (path){
+  bgApp.playSound = function (path, volume){
     var sound;
+    if ( typeof volume === 'undefined' ) volume = 1;
 
     if ( !/^data:audio/.test(path) ) {
       path = /^http/i.test(path) ? path : utils.runtime.getURL(path);
@@ -160,6 +161,7 @@
 
     sound = new Audio();
     sound.src = path;
+    sound.volume = volume;
     sound.play();
   };
 
@@ -235,7 +237,8 @@
       radio: true,
       opts : [
         {id: "newlayout", name: "__MSG_m16__"},
-        {id: "popout", name: "__MSG_m17__"}
+        {id: "popout", name: "__MSG_m17__"},
+        {id: "theatrelayout", name: "__MSG_m88__"}
       ],
       show : true,
       value: "newlayout"
@@ -301,6 +304,17 @@
       value: "common/audio/ding.ogg"
     },
     {
+      id   : "notificationVolume",
+      desc : "__MSG_m86__",
+      range: true,
+      show : true,
+      type : "range",
+      tip  : "%",
+      min  : 1,
+      max  : 100,
+      value: 100
+    },
+    {
       id    : "customNotificationSound",
       desc  : "__MSG_m75__",
       button: true,
@@ -318,6 +332,14 @@
       min  : 1,
       max  : 60,
       value: 5
+    },
+    {
+      id      : "G2Aref",
+      desc    : "Support TwitchNow (every order you made on G2A will help us)",
+      checkbox: true,
+      type    : "checkbox",
+      show    : true,
+      value   : true
     }
   ];
 
@@ -474,22 +496,110 @@
     }
   });
 
+  var UpdatableCollection = Backbone.Collection.extend({
+    auto        : false,
+    pagination  : false,
+    timeout     : 60 * 1000,
+    pageQuery   : {
+      offset: 0,
+      limit : 20
+    },
+    defaultQuery: {
+      limit : 50,
+      offset: 0
+    },
+    updating    : false,
+    interval    : null,
+    send        : function (){
+      throw new Error("Not implemented");
+    },
+    parse       : function (){
+      throw new Error("Not Implemented");
+    },
+    beforeUpdate: function (){
+    },
+    afterUpdate : function (){
+    },
+    loadNext    : function (){
+      if ( this.pagination && !this.updating ) {
+        this.pageQuery.offset = this.length + 1;
+        this.update(this.pageQuery, {add: true}, function (){
+          console.log("loadNext() complete");
+        })
+      } else {
+
+      }
+    },
+    update      : function (query, opts, callback){
+      //reset pageQuery params on user update or reset
+      if ( arguments.length == 0 || opts.reset ) {
+        this.pageQuery.offset = 0;
+      }
+      query = $.extend({}, this.defaultQuery, query);
+      opts = opts || {reset: true};
+      callback = callback || $.noop;
+
+      clearTimeout(this.interval);
+
+      this.updating = true;
+      this.trigger("update-status", this.updating);
+      this.beforeUpdate();
+      this.send(query, function (err, res){
+        console.log(err, res);
+        this.updating = false;
+        this.trigger("update-status", this.updating);
+
+        if ( this.auto ) {
+          this.interval = setTimeout(function (){
+            this.update(this.defaultQuery, {reset: true}, $.noop);
+          }.bind(this), this.timeout);
+        }
+
+        if ( err ) {
+          if ( err.status == 401 ) {
+            this.trigger("error", "auth");
+          } else {
+            this.trigger("error", "api");
+          }
+          this.afterUpdate();
+          callback();
+        } else {
+          this.parse(res, function (err, result){
+            if ( err ) {
+              this.trigger("error", "api");
+            }
+            if ( opts.add ) {
+              var addedModels = this.add(result, {silent: true});
+              this.afterUpdate();
+              this.trigger("addarray", addedModels);
+            } else {
+              this.reset(result, {silent: true});
+              this.afterUpdate();
+              this.trigger("update");
+            }
+            callback();
+          }.bind(this));
+        }
+
+      }.bind(this));
+    }
+  })
+
   var Video = TwitchItemModel.extend();
 
-  var Videos = Backbone.Collection.extend({
-    model     : Video,
-    updateData: function (){
-      twitchApi.send(this.url, this.query(), function (err, res){
-        if ( err || !res || !res.videos ) {
-          return this.trigger("error", "api");
-        }
-        if ( res.videos.length == 0 ) {
-          return this.trigger("error", "novideo");
-        }
-
-        this.reset(res.videos, {silent: true});
-        this.trigger("update");
-      }.bind(this));
+  var Videos = UpdatableCollection.extend({
+    model: Video,
+    send : function (query, callback){
+      twitchApi.send(this.url, this.query(), callback);
+    },
+    parse: function (res, callback){
+      if ( !res || !res.videos ) {
+        return callback(new Error("api"));
+      }
+      if ( res.videos.length == 0 ) {
+        return callback(new Error("emptyResult"));
+      }
+      return callback(null, res.videos);
     }
   });
 
@@ -539,75 +649,64 @@
     }
   });
 
-  var Games = Backbone.Collection.extend({
-
-    model: Game,
+  var Games = UpdatableCollection.extend({
+    auto      : true,
+    pagination: true,
+    timeout   : 5 * 60 * 1000,
+    model     : Game,
 
     findByName: function (gameName){
       return this.find(function (g){
         return g.get("game").name == gameName;
       })
     },
-
-    updateData: function (){
-      clearTimeout(this.timeout);
-      twitchApi.send("gamesTop", {}, function (err, res){
-        this.timeout = setTimeout(this.updateData.bind(this), 5 * 60 * 1000);
-        if ( err || !res || !res.top ) {
-          return this.trigger("error", "api");
-        }
-        if ( res.top.length == 0 ) {
-          return this.trigger("error", "api");
-        }
-
-        res.top.forEach(function (g){
-          g._id = g.game._id;
-        });
-        this.reset(res.top, {silent: true});
-        this.trigger("update");
-      }.bind(this));
+    parse     : function (res, callback){
+      if ( !res || !res.top ) {
+        return callback(new Error("api"));
+      }
+      if ( res.top.length == 0 ) {
+        return callback(new Error("emptyResult"));
+      }
+      res.top.forEach(function (g){
+        g._id = g.game._id;
+      });
+      return callback(null, res.top);
+    },
+    send      : function (query, callback){
+      twitchApi.send("gamesTop", query, callback);
     }
   });
 
   var FollowedGames = Games.extend({
+    auto      : true,
+    pagination: false,
+    timeout   : 5 * 60 * 1000,
     initialize: function (){
       var self = this;
 
       twitchApi.on("authorize", function (){
-        self.updateData();
+        self.update();
       })
 
       twitchApi.on("revoke", function (){
         self.reset();
       });
     },
-    updateData: function (){
-      clearTimeout(this.timeout);
-
-      if ( !twitchApi.userName ) {
-        return this.trigger("error", "auth");
+    send      : function (query, callback){
+      twitchApi.send("followedgames", query, callback);
+    },
+    parse     : function (res, callback){
+      if ( !res || !res.follows ) {
+        return callback(new Error("api"));
       }
-      twitchApi.send("followedgames", {}, function (err, res){
-        this.timeout = setTimeout(this.updateData.bind(this), 5 * 60 * 1000);
-        if ( err ) {
-          if ( err.status == 401 ) {
-            return this.trigger("error", "auth");
-          }
-          return this.trigger("error", "api");
-        }
-        if ( !res || !res.follows ) {
-          return this.trigger("error", "api");
-        }
 
-        if ( res.follows.length == 0 ) {
-          return this.trigger("error", "nofollowedgames");
-        }
-        res.follows.forEach(function (g){
-          g._id = g.game._id;
-        });
-        this.reset(res.follows, {silent: true});
-        this.trigger("update");
-      }.bind(this));
+      if ( res.follows.length == 0 ) {
+        return callback(new Error("emptyResult"));
+      }
+      res.follows.forEach(function (g){
+        g._id = g.game._id;
+      });
+      return callback(null, res.follows);
     }
   })
 
@@ -647,13 +746,13 @@
     },
     loadFromStorage       : function (){
       if ( twitchApi.isAuthorized() ) {
-        return bgApp.get("notifications_" + twitchApi.userName);
+        return bgApp.get("notifications_" + twitchApi.userName) || [];
       } else {
         this.trigger("error", "auth");
-        return null;
+        return [];
       }
     },
-    getChannelNotification: function (cid, type, callback){
+    getChannelNotification: function (cid, type){
       var self = this;
 
       var channel = _.findWhere(self.loadFromStorage(), {_id: cid});
@@ -672,59 +771,60 @@
           }
         });
         bgApp.set("notifications_" + twitchApi.userName, val);
-
-
-        if ( !settings.get("playNotificationSound").get("value") ) {
-          var hasSoundNotifications = _.findIndex(this.models, function (ch){
-            return ch.attributes.notificationOpts.sound == true;
-          })
-          hasSoundNotifications = hasSoundNotifications > -1;
-
-          if ( hasSoundNotifications ) {
-            settings.get("playNotificationSound").set("value", true);
-          }
-        }
-
       } else {
         this.trigger("error", "auth");
       }
     },
-    updateData            : function (){
+    update                : function (){
       var self = this;
-      var count = -1;
       var channels = [];
 
-      function getFollowedChannels(cb){
-        count++;
-        twitchApi.send("follows", {offset: count * 100, limit: 100}, function (err, res){
-          if ( err || !res.follows ) {
+      function getFollowedChannelsCount(cb){
+        twitchApi.send("follows", {offset: 0, limit: 1}, function (err, res){
+          if ( err || !res || !res._total ) {
             return cb(err || new Error("No Total channels"));
           }
-
-          if ( res.follows.length == 0 ) {
-            return cb(null, channels);
-          } else {
-            res.follows.forEach(function (c){
-              c._id = c.channel._id;
-              c.channel.logo = c.channel.logo || "http://static-cdn.jtvnw.net/jtv_user_pictures/xarth/404_user_50x50.png";
-              c.channel.logo = c.channel.logo.replace("300x300", "50x50");
-            });
-            channels = channels.concat(res.follows);
-          }
-          getFollowedChannels(cb);
+          return cb(null, parseInt(res._total));
         })
       }
 
-      getFollowedChannels(function (err, channels){
-        if ( err ) {
-          return self.trigger("error", "api");
-        } else {
-          self.reset(channels, {silent: true});
-          //merge with stored notification preferences
-          self.set(self.loadFromStorage(), {add: false, remove: false, merge: true, silent: true});
-          self.trigger("update");
+      function getFollowedChannels(count, cb){
+        twitchApi.send("follows", {offset: count * 100, limit: 100}, function (err, res){
+          if ( err || !res || !res.follows ) {
+            return cb(err || new Error("No Total channels"));
+          }
+
+          res.follows.forEach(function (c){
+            c._id = c.channel._id;
+            c.channel.logo = c.channel.logo || "http://static-cdn.jtvnw.net/jtv_user_pictures/xarth/404_user_50x50.png";
+            c.channel.logo = c.channel.logo.replace("300x300", "50x50");
+          });
+          channels = channels.concat(res.follows);
+
+          return cb(null);
+        })
+      }
+
+      getFollowedChannelsCount(function (err, count){
+        var fns = [];
+        var limit = 4;
+        var requestCount = Math.ceil(count / 100);
+
+        for ( var i = 0; i < requestCount; i++ ) {
+          fns.push(getFollowedChannels.bind(null, i));
         }
-      })
+
+        async.parallelLimit(fns, limit, function (err, results){
+          if ( err ) {
+            return self.trigger("error", "api");
+          } else {
+            self.reset(channels, {silent: true});
+            //merge with stored notification preferences
+            self.set(self.loadFromStorage(), {add: false, remove: false, merge: true, silent: true});
+            self.trigger("update");
+          }
+        })
+      });
     }
   })
 
@@ -766,11 +866,35 @@
       type = type || settings.get("openStreamIn").get("value");
 
       var links = {
-        newlayout: "/ID",
-        popout   : "/ID/popout"
+        theatrelayout: "/ID?mode=theater",
+        newlayout    : "/ID",
+        popout       : "/ID/popout"
       };
 
       return this.baseUrl() + links[type].replace(/ID/, this.get("channel").name);
+    },
+
+    openMultitwitch: function (){
+      var self = this;
+      var url = "http://multitwitch.tv";
+      var updatedTabUrl;
+      utils.tabs.query({}, function (tabs){
+        tabs = tabs.filter(function (t){
+          return /https*:\/\/(www\.)*multitwitch\.tv/.test(t.url);
+        })
+
+        //update last tab with multitwitch
+        if ( tabs.length ) {
+          var tab = tabs[tabs.length - 1];
+          var tabUrl = tab.url;
+          updatedTabUrl = tabUrl + "/" + self.get("channel").name;
+          utils.tabs.update(tab.id, {url: updatedTabUrl});
+        } else {
+          //creare new tab with multitwitch
+          updatedTabUrl = url + "/" + self.get("channel").name;
+          utils.tabs.create({url: updatedTabUrl, active: false});
+        }
+      });
     },
 
     openStream: function (type){
@@ -790,7 +914,7 @@
     }
   });
 
-  var StreamCollection = Backbone.Collection.extend({
+  var StreamCollection = UpdatableCollection.extend({
 
     model: Stream,
 
@@ -813,10 +937,25 @@
           : a.get(prop) < b.get(prop) ? -1 * reverse : 0;
       };
       this.sort();
-    }
+    },
+
+    parse: function (res, callback){
+      if ( !res || !res.streams ) {
+        return callback(new Error("api"));
+      }
+      if ( res.streams.length == 0 ) {
+        return callback(new Error("emptyResult"));
+      }
+      return callback(null, res.streams);
+    },
   });
 
   var FollowingCollection = StreamCollection.extend({
+    pagination: false,
+    auto      : true,
+    //TODO dynamic timeout
+    //timeout: settings.get("refreshInterval").get("value") * 60 * 1000,
+    timeout   : 5 * 60 * 1000,
 
     model: Stream,
 
@@ -845,7 +984,7 @@
       })
 
       twitchApi.on("authorize", function (){
-        self.updateData();
+        self.update();
       })
 
       twitchApi.on("revoke", function (){
@@ -862,70 +1001,54 @@
       });
     },
 
-    addedStreams: [],
-    notified    : [], //store notified streams id here
-    notify      : function (){
+    addedStreams   : [],
+    idsBeforeUpdate: [],
+    idsAfterUpdate : [],
+    notified       : [], //store notified streams id here
+    notify         : function (){
       var self = this;
-      twitchApi.getUserName(function (err){
 
+      twitchApi.getUserName(function (){
         //notify about all streams if error happens
-        var desktopNotifications = err ?
-          self.getNewStreams() :
-          self.getNewStreams()
-            .filter(function (stream){
-              return notifications.getChannelNotification(stream.get("channel")._id, "desktop")
-            })
+        var desktopNotifications = self.getNewStreams()
+          .filter(function (stream){
+            return notifications.getChannelNotification(stream.get("channel")._id, "desktop")
+          })
 
-        var soundNotifications = err ?
-          self.getNewStreams() :
-          self.getNewStreams()
-            .filter(function (stream){
-              return notifications.getChannelNotification(stream.get("channel")._id, "sound")
-            })
+        var soundNotifications = self.getNewStreams()
+          .filter(function (stream){
+            return notifications.getChannelNotification(stream.get("channel")._id, "sound")
+          })
 
-        if ( desktopNotifications.length ) {
-          if ( settings.get("showDesktopNotification").get("value") ) {
-            bgApp.sendNotification(desktopNotifications);
-          }
+        if ( desktopNotifications.length && settings.get("showDesktopNotification").get("value") ) {
+          bgApp.sendNotification(desktopNotifications);
         }
 
-        if ( soundNotifications.length ) {
-          if ( settings.get("playNotificationSound").get("value") ) {
-            bgApp.playSound(settings.getNotificationSoundSource());
-          }
+        if ( soundNotifications.length && settings.get("playNotificationSound").get("value") ) {
+          bgApp.playSound(settings.getNotificationSoundSource(), settings.get("notificationVolume").get("value") / 100);
         }
       })
+
     },
-    updateData  : function (){
-      var idsBeforeUpdate = this.pluck("_id");
-      var idsAfterUpdate;
-
-      clearTimeout(this.timeout);
-
-      twitchApi.send("followed", {}, function (err, res){
-
-        this.timeout = setTimeout(this.updateData.bind(this), settings.get("refreshInterval").get("value") * 60 * 1000);
-
-        if ( err ) {
-          if ( err.status && err.status == 401 ) {
-            return this.trigger("error", "auth");
-          }
-          return this.trigger("error", "api");
-        }
-        if ( !res || !res.streams ) {
-          return this.trigger("error", "api");
-        }
-        if ( res.streams.length == 0 ) {
-          return this.trigger("error", "nostreams");
-        }
-
-        this.set(res.streams, {silent: true});
-
-        idsAfterUpdate = this.pluck("_id");
-        this.addedStreams = _.difference(idsAfterUpdate, idsBeforeUpdate, this.notified);
-        this.notified = _.union(this.addedStreams, this.notified);
-        this.trigger("update");
-      }.bind(this));
+    beforeUpdate   : function (){
+      this.idsBeforeUpdate = this.pluck("_id");
+    },
+    send           : function (query, callback){
+      twitchApi.send("followed", {}, callback);
+    },
+    parse          : function (res, callback){
+      StreamCollection.prototype.parse.call(this, res, function (err, streams){
+        if ( err ) return callback(err);
+        streams.forEach(function (s){
+          s.favorite = true;
+        })
+        return callback(null, streams);
+      })
+    },
+    afterUpdate    : function (){
+      this.idsAfterUpdate = this.pluck("_id");
+      this.addedStreams = _.difference(this.idsAfterUpdate, this.idsBeforeUpdate, this.notified);
+      this.notified = _.union(this.addedStreams, this.notified);
     }
   });
 
@@ -951,46 +1074,30 @@
 
   var GameStreams = StreamCollection.extend({
     game      : null,
-    updateData: function (){
-      twitchApi.send("streams", {game: this.game, limit: 50}, function (err, res){
-        if ( err ) {
-          return this.trigger("error", "api");
-        }
-        this.reset(res.streams, {silent: true});
-        this.trigger("update");
-      }.bind(this));
+    pagination: true,
+    send      : function (query, callback){
+      query.game = this.game;
+      twitchApi.send("streams", query, callback);
     }
   });
 
   var TopStreamsCollection = StreamCollection.extend({
-    updateData: function (){
-      twitchApi.send("streams", {limit: 50}, function (err, res){
-        this.timeout = setTimeout(this.updateData.bind(this), 5 * 60 * 1000);
-        if ( err ) {
-          return this.trigger("error", "api");
-        }
-        this.reset(res.streams, {silent: true});
-        this.trigger("update");
-      }.bind(this));
+    auto        : true,
+    pagination  : true,
+    timeout     : 5 * 60 * 1000,
+    defaultQuery: {
+      limit : 50,
+      offset: 0
+    },
+    send        : function (query, callback){
+      twitchApi.send("streams", query, callback);
     }
   });
 
   var SearchCollection = StreamCollection.extend({
-    query     : null,
-    updateData: function (){
-      if ( !this.query ) {
-        return this.trigger("error", "nosearchquery");
-      }
-      twitchApi.send("searchStreams", {query: this.query, limit: 50}, function (err, res){
-        if ( err || !res || !res.streams ) {
-          return this.trigger("error", "api");
-        }
-        if ( res.streams.length == 0 ) {
-          return this.trigger("error", "nosearchresults");
-        }
-        this.reset(res.streams, {silent: true});
-        this.trigger("update");
-      }.bind(this));
+    query: null,
+    send : function (query, callback){
+      twitchApi.send("searchStreams", {query: this.query, limit: 50}, callback);
     }
   });
 
@@ -1000,9 +1107,6 @@
     model     : Contributor,
     url       : "https://api.github.com/repos/ndragomirov/twitch-now/contributors",
     initialize: function (){
-      this.updateData();
-    },
-    updateData: function (){
       this.fetch({reset: true});
     }
   });
@@ -1070,10 +1174,10 @@
   var donations = root.donations = new DonationCollection;
   var contributors = root.contributors = new ContributorCollection;
   var following = root.following = new FollowingCollection;
+  var followedgames = root.followedgames = new FollowedGames;
   var topstreams = root.topstreams = new TopStreamsCollection;
   var videos = root.videos = new ChannelVideos;
   var games = root.games = new Games;
-  var followedgames = root.followedgames = new FollowedGames;
   var search = root.search = new SearchCollection;
   var user = root.user = new User;
   var gameLobby = root.gameLobby = new GameLobby;
@@ -1102,9 +1206,8 @@
     followedgames.remove(game);
   })
 
-  topstreams.updateData();
-  games.updateData();
-  notifications.updateData();
+  topstreams.update();
+  games.update();
 
   bgApp.init();
 
