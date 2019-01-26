@@ -52,7 +52,7 @@
     "storage",
     "https://*/*",
     "http://*/*",
-    "tabs",
-    "notifications"
+    "notifications",
+    "tabs"
   ]
 }

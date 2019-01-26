@@ -11,6 +11,10 @@
     background: rgba(55, 55, 55, 1);
 }
 
+.white-version .screen-msg h2 {
+    color: rgba(55, 55, 55, 1);
+}
+
 .white-version #context-menu {
     background: rgb(255, 255, 255);
 }
@@ -64,19 +68,20 @@
     margin-bottom: 10px;
 }
 
-.white-version .donation span {
-    color: rgba(0, 0, 0, 1);
-}
-
 .white-version i[class^="icon-"] {
     color: rgb(75, 40, 140);
     text-shadow: none;
 }
 
+.white-version .control input[type="text"] {
+    border: 1px solid #cccccc;
+    background-color: rgb(255, 255, 255);
+    color: rgb(120, 120, 120);
+}
+
 .white-version .stream {
     border-top: 1px solid rgb(252, 252, 252);
     border-bottom: 1px solid rgb(220, 220, 220);
-    background-image: url("../img/row_arrow_grey.png");
 }
 
 .white-version .stream .stream-title {
@@ -95,11 +100,11 @@
     -moz-box-shadow: none;
 }
 
-.white-version  .stream:hover {
+.white-version .stream:hover {
     background-color: rgb(248, 248, 248);
 }
 
-.white-version  .stream .item-image-container {
+.white-version .stream .item-image-container {
     border: 1px solid rgb(255, 255, 255);
 }
 
@@ -131,4 +136,8 @@
 
 .white-version .button .icon.icon-play {
     background-image: url(../img/play-dark.png);
+}
+
+.white-version .stream .icon-vodcast {
+    background-image: url(../img/video-dark.svg);
 }

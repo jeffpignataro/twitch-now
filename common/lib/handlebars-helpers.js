@@ -4,6 +4,7 @@ function formatDuration(s){
   if ( isNaN(s) ) return '';
 
   var fm = [
+    Math.floor(s / 60 / 60 / 24),
     Math.floor(s / 60 / 60) % 24,
     Math.floor(s / 60) % 60,
     s % 60
@@ -11,13 +12,22 @@ function formatDuration(s){
 
   return fm.map(function (v, i){
     return ((v < 10) ? '0' : '') + v;
-  }).join(':').replace(/00:0{0,1}|^0/, "");
+  }).join(':').replace(/^(00:)*/, "").replace(/^0(\d)/, '$1')
 }
 
 Handlebars.registerHelper('h-checked', function (input, parent){
-  var v = input && parent ?
-  input.id === parent.value :
-    this.value;
+  var v = false;
+
+  if ( input && !parent.type ) {
+    v = input.value;
+  }
+  else if ( input && parent.type ) {
+    if ( Array.isArray(parent.value) ) {
+      v = parent.value.indexOf(input.id) > -1;
+    } else {
+      v = input.id === parent.value;
+    }
+  }
   return v ? 'checked' : '';
 });
 
@@ -26,7 +36,7 @@ Handlebars.registerHelper('h-checked-2', function (context, block){
 });
 
 Handlebars.registerHelper('h-num-format', function (v){
-  return v ? v.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ") : '';
+  return isNaN(v) ? '' : v.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 })
 
 Handlebars.registerHelper('h-uptime', function (v){

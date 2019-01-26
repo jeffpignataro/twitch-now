@@ -14,14 +14,25 @@
     display: none;
 }
 
-.game .game-preview {
-    width: 70px;
-    height: 98px;
+.game-list-item {
+    float: left;
+    width: 77px;
+    padding: 10px 9px;
+    background: none;
+    border: none !important;
+}
+
+.game-list-item .game-preview {
+    margin-bottom: 5px;
+}
+
+.game-list-item .item-image-container {
+    float: none;
 }
 
 .game-preview {
     width: 74px;
-    height: 42px;
+    height: 102px;
 }
 
 .game .game-preview .game-follow {
@@ -98,7 +109,7 @@
 .game .buttons {
     display: inline-block;
     position: absolute;
-    bottom: 10px;
+    bottom: 6px;
 }
 
 .game .buttons .button {
@@ -117,10 +128,19 @@
     cursor: pointer;
     text-align: center;
     font-size: 11px;
+    text-decoration: none;
     position: relative;
-    -webkit-transition: background 100ms linear;
-    -moz-transition: background 100ms linear;
+    /*-webkit-transition: background 100ms linear;*/
+    /*-moz-transition: background 100ms linear;*/
     padding: 0 10px;
+}
+
+.button.button-load-more {
+    left: 50%;
+    transform: translate(-50%);
+    margin-top: 10px;
+    margin-bottom: 10px;
+    bottom: 0px;
 }
 
 .button:hover {

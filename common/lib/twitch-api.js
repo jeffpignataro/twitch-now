@@ -8,6 +8,7 @@
     if ( !clientId ) throw new Error("clientId is required");
     this.basePath = "https://api.twitch.tv/kraken";
     this.userName = "";
+    this.userId = "";
     this.clientId = clientId;
     this.timeout = 10 * 1000;
     this.token = "";
@@ -20,21 +21,13 @@
   }
 
   TwitchApi.prototype.authorize = function (){
-    if ( isFirefox ) {
-      self.port.emit("OAUTH2_AUTH");
-    } else {
-      twitchOauth.authorize(function (){
-      })
-    }
+    twitchOauth.authorize(function (){
+    })
   }
 
   TwitchApi.prototype.revoke = function (){
     if ( this.token && this.token.length > 0 ) {
-      if ( isFirefox ) {
-        self.port.emit("OAUTH2_REVOKE");
-      } else {
-        twitchOauth.clearAccessToken();
-      }
+      twitchOauth.clearAccessToken();
     }
   }
 
@@ -43,7 +36,7 @@
       timeout : this.timeout,
       dataType: "json",
       headers : {
-        "Accept"       : "application/vnd.twitchtv.v3+json",
+        "Accept"       : "application/vnd.twitchtv.v5+json",
         "Client-ID"    : this.clientId,
         "Authorization": " OAuth " + this.token
       }
@@ -64,16 +57,19 @@
       }
     });
 
-    if ( isFirefox ) {
-      self.port.on("OAUTH2_TOKEN", function (accessToken){
-        _self.trigger("tokenchange", accessToken);
-      })
-      self.port.emit("OAUTH2_TOKEN");
-    } else {
-      twitchOauth.on("OAUTH2_TOKEN", function (){
-        _self.trigger("tokenchange", twitchOauth.getAccessToken());
-      })
+    twitchOauth.on("OAUTH2_TOKEN", function (){
+      _self.trigger("tokenchange", twitchOauth.getAccessToken());
+    })
+  }
+
+  function encode(o){
+    var r = [];
+    for ( var i in o ) {
+      if ( o.hasOwnProperty(i) ) {
+        r.push(encodeURIComponent(i) + '=' + encodeURIComponent(o[i]));
+      }
     }
+    return r.join('&');
   }
 
   TwitchApi.prototype.getUserName = function (cb){
@@ -99,6 +95,7 @@
         if ( !res.token.user_name ) {
           return cb(err);
         }
+        _self.userId = res.token.user_id;
         _self.userName = userName = res.token.user_name;
         return cb(null, userName);
       });
@@ -125,11 +122,46 @@
 
       //rewrite basePath if full url provided by requestOpts
       requestOpts.url = /^http/.exec(requestOpts.url) ? requestOpts.url : _self.basePath + requestOpts.url;
-      requestOpts.url = requestOpts.url.replace(/:user/, userName);
+      requestOpts.url = requestOpts.url.replace(/:user_name/, userName);
+      requestOpts.url = requestOpts.url.replace(/:user_id/, _self.userId);
       requestOpts = $.extend(true, requestOpts, {data: opts}, _self.getRequestParams());
-      $.ajax(requestOpts)
-        .done(function (data){
-          //workaround for inconsistent API preview returns
+
+      var url = new URL(requestOpts.url);
+
+      if ( requestOpts.type == "GET" && requestOpts.data ) {
+        Object
+          .keys(requestOpts.data)
+          .forEach(function(key) {
+            return url.searchParams.append(key, requestOpts.data[key]);
+          });
+      }
+
+      var _h = new Headers();
+      for ( var i in requestOpts.headers ) {
+        _h.append(i, requestOpts.headers[i]);
+      }
+
+      var _ropts = {
+        method  : requestOpts.type,
+        headers : _h,
+        redirect: 'follow',
+      }
+      if ( requestOpts.type != "GET" && requestOpts.type != "HEAD" ) {
+        if ( requestOpts.data ) {
+          _ropts.headers.append('Content-Type', 'application/x-www-form-urlencoded; charset=utf-8');
+          _ropts.body = encode(requestOpts.data);
+        }
+      }
+
+      var _r = new Request(url, _ropts);
+
+      fetch(_r).then(function (res){
+        console.log(res.body);
+        if ( res.status == 204 ) {
+          _self.trigger("done:" + methodName);
+          return cb(null, res);
+        }
+        res.json().then(function (data){
           if ( /^(streams|searchStreams|followed)$/.test(methodName) ) {
             if ( data.streams && data.streams.length ) {
               data.streams = data.streams.map(function (s){
@@ -146,12 +178,10 @@
           _self.trigger("done:" + methodName);
           cb(null, data);
         })
-        .fail(function (xhr){
-//          if ( xhr.status == 401 ) {
-//            _self.revoke();
-//          }
+      })
+        .catch(function (res){
           _self.trigger("fail:" + methodName);
-          cb({err: "err" + methodName, status: xhr.status});
+          cb({err: "err" + methodName, status: res.status});
         })
     });
   }
@@ -211,7 +241,7 @@
       type: "GET",
       url : "/games/top",
       data: {
-        limit: 50
+        limit: 40
       }
     }
   }
@@ -219,7 +249,17 @@
   methods.follows = function (){
     return {
       type: "GET",
-      url : "/users/:user/follows/channels",
+      url : "/users/:user_id/follows/channels",
+      data: {
+        limit: 100
+      }
+    }
+  }
+
+  methods.hosts = function (){
+    return {
+      type: "GET",
+      url : "https://api.twitch.tv/api/users/:user_name/followed/hosting",
       data: {
         limit: 100
       }
@@ -229,7 +269,7 @@
   methods.followedgames = function (){
     return {
       type: "GET",
-      url : "http://api.twitch.tv/api/users/:user/follows/games/live",
+      url : "https://api.twitch.tv/api/users/:user_name/follows/games/live",
       data: {
         limit: 100
       }
@@ -239,28 +279,28 @@
   methods.gameFollow = function (){
     return {
       type: "PUT",
-      url : "http://api.twitch.tv/api/users/:user/follows/games/follow"
+      url : "https://api.twitch.tv/api/users/:user_name/follows/games/follow"
     }
   }
 
   methods.gameUnfollow = function (){
     return {
       type: "DELETE",
-      url : "http://api.twitch.tv/api/users/:user/follows/games/unfollow"
+      url : "https://api.twitch.tv/api/users/:user_name/follows/games/unfollow"
     }
   }
 
   methods.follow = function (){
     return {
       type: "PUT",
-      url : "/users/:user/follows/channels/:target"
+      url : "/users/:user_id/follows/channels/:target"
     }
   }
 
   methods.unfollow = function (){
     return {
       type: "DELETE",
-      url : "/users/:user/follows/channels/:target"
+      url : "/users/:user_id/follows/channels/:target"
     }
   }
 

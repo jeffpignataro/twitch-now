@@ -5,14 +5,18 @@
   var b = app.b = utils._getBackgroundPage();
   var _baron;
 
+
   app.twitchApi = b.twitchApi;
   app.currentView = null;
   app.views = {};
   app.windowOpened = false;
 
   app.resetScroll = function (){
+    app.container.removeClass('shift');
     app.container.scrollTop(0);
-    _baron.update();
+    if (utils.rbrowser != 'firefox') {
+      _baron.update();
+    }
   }
 
   app.lazyload = function (){
@@ -49,12 +53,14 @@
   }
 
   app.init = function (){
+
     app.container = $('#content');
     app.scroller = app.container.find(".scroller");
     app._scroller = document.querySelector(".scroller");
     app.scrollerBar = document.querySelector(".scroller__bar");
     app.preloader = $("<div id='preloader'><img src='../img/spinner.gif'/></div>");
     app.streamPreloader = $("<div id='preloader-stream'><img src='../img/spinner.gif'/></div>");
+    app.btnPreloader = $("<div id='preloader-btn'><img src='../img/spinner.gif'/></div>");
 
     i18n.setGetMessageFn(utils.i18n.getMessage);
     i18n.replace(document.body);
@@ -63,9 +69,8 @@
     var views = app.views;
     this.router = new this.Router;
 
-
     app.scroller.on("scroll", function (){
-      if ( app._scroller.scrollTop + app._scroller.offsetHeight == app._scroller.scrollHeight ) {
+      if ( app._scroller.scrollTop + app._scroller.offsetHeight >= app._scroller.scrollHeight - 200 ) {
         if ( app.curView && app.curView.loadNext && $("#filterInput").val().length == 0 ) {
           app.curView.loadNext();
         }
@@ -76,12 +81,15 @@
 
     views.topMenu = new TopMenu;
 
-    _baron = baron({
-      root    : '#content',
-      scroller: '.scroller',
-      bar     : '.scroller__bar',
-      barOnCls: 'baron'
-    }).autoUpdate();
+    if (utils.rbrowser != 'firefox'){
+      _baron = baron({
+        root    : '#content',
+        scroller: '.scroller',
+        bar     : '.scroller__bar',
+        barOnCls: 'baron'
+      }).autoUpdate();
+    }
+
 
     Backbone.history.start();
 
@@ -100,13 +108,50 @@
 
     views.followedGames = new GameListView({
       el        : "#followed-game-screen",
-      collection: b.followedgames
+      collection: b.followedgames,
+      messages  : {
+        noresults: {
+          header: "__MSG_m107__",
+          text  : "__MSG_m108__"
+        }
+      }
+    })
+
+    new FollowedChannelsView({
+      el        : "#followed-channels-screen",
+      collection: b.followedChannels,
+      messages  : {
+        noresults: {
+          text: ""
+        }
+      }
     })
 
     views.gameLobby = new GameLobbyView({
-      el   : "#gamelobby",
-      route: "gameLobby",
+      el   : "#gamelobby-game",
       model: b.gameLobby
+    })
+
+    views.gameStreamsView = new GameStreamsView({
+      el               : "#gamelobby-streams",
+      collection       : b.gameStreams,
+      preloaderOnUpdate: true,
+      messages         : {
+        noresults: {
+          button : "__MSG_m105__",
+          onclick: function (){
+            this.collection.disableLanguageFilter();
+            this.collection.update();
+          },
+          text   : "__MSG_m103__"
+        }
+      }
+    });
+
+    views.gameVideosView = new VideoListView({
+      el               : "#gamelobby-videos",
+      collection       : b.gameVideos,
+      preloaderOnUpdate: true
     })
 
     views.info = new InfoView({
@@ -118,19 +163,36 @@
       collection: b.topstreams
     });
 
-    views.following = new StreamListView({
-      el        : "#stream-screen",
-      collection: b.following
+    views.following = new FollowingStreamsView({
+      el                : "#stream-screen",
+      collection        : b.following,
+      channelsCollection: b.followedChannels,
+      messages          : {
+        noresults: {
+          header: "__MSG_m107__",
+          text  : "__MSG_m109__"
+        }
+      }
     });
 
     views.videos = new VideoListView({
       el        : "#video-screen",
-      collection: b.videos
+      collection: b.videos,
+      messages  : {
+        noresults: {
+          text: "__MSG_m104__"
+        }
+      }
     });
 
     views.search = new SearchView({
       el        : "#search-screen",
-      collection: b.search
+      collection: b.search,
+      messages  : {
+        noresults: {
+          text: "__MSG_m50__"
+        }
+      }
     });
 
     views.browseGames = new GameListView({
@@ -146,41 +208,43 @@
       collection: b.settings
     });
 
-    new DonationListView({
-      el        : ".donation-list",
-      collection: b.donations
-    })
-
     new ContributorListView({
       el        : ".contributor-list",
       collection: b.contributors
     })
 
-//    app.lazyload();
+    $(window).on("popup-close", function (){
+      app.scroller.scrollTop(0); //reset scroll on popup close for firefox
+      b.bgApp.dispatcher.trigger("popup-close");
+    });
+
+    $(self).on("unload", function (){
+      $(window).trigger("popup-close");
+    })
+
+    app.lazyload();
 
     $("body")
       .on('click', '*[data-route]', function (){
         var route = $(this).attr('data-route');
         window.location.hash = '#' + route;
       })
-      .one('mouseenter', function (){
-        app.lazyload();
-      })
       .on('click', '.js-tab', function (e){
         var href = $(this).attr('data-href');
         utils.tabs.create({url: href});
         e.preventDefault();
+        window.close();
       })
 
       .on('click', '.js-window', function (e){
         var windowOpts = JSON.parse($(this).attr('data-window-opts') || "{}");
         utils.windows.create($.extend({url: $(this).attr('data-href')}, windowOpts));
         e.preventDefault();
+        window.close();
       })
 
     $('.tip').tooltip();
 
-    console.log(window.location.href);
   };
 
   var DefaultView = Backbone.View.extend({
@@ -196,18 +260,15 @@
     onhide       : function (){
 
     },
-    onunload     : function (){
-
-    },
     initialize   : function (){
       $(self).unload(function (){
         this.undelegateEvents();
         this.stopListening();
-        this.onunload();
       }.bind(this));
     },
-    showPreloader: function (){
-      this.$el.append(this.app.streamPreloader);
+    showPreloader: function (container){
+      container = container || this.$el;
+      container.append(this.app.streamPreloader);
     },
     hidePreloader: function (){
       this.app.streamPreloader.detach();
@@ -247,8 +308,8 @@
   var TopMenu = DefaultView.extend({
     el            : "#top-menu",
     events        : {
-      "click #refresh-btn"  : "refresh",
-      "keyup #filterInput"  : "filter"
+      "click #refresh-btn": "refresh",
+      "keyup #filterInput": "filter"
     },
     show          : function (){
       this.$el.show();
@@ -273,7 +334,10 @@
         this.app.curView.$el.find(".js-filterable").each(function (i, e){
           $(e).toggle(!!$(e).text().toLowerCase().match(rFilter));
         });
-        _baron.update();
+        if (utils.rbrowser != 'firefox') {
+          _baron.update();
+        }
+
       }
     },
     refresh       : function (){
@@ -313,7 +377,6 @@
   var SettingsView = LazyRenderView.extend({
     el    : "#settings-screen",
     events: {
-      "click input[data-id=\"notificationSound\"]"      : "playSound",
       "click input[data-id=\"customNotificationSound\"]": "uploadSound",
       "change input[type=\"range\"]"                    : "rangeHelper",
       "change input, select"                            : "serialize"
@@ -335,7 +398,11 @@
     onModelChange: function (model, options){
       var v = model.get("value");
 
-      switch ( model.get("id") ) {
+      switch (model.get("id")) {
+        case "notificationSound":
+          this.playSound()
+          break;
+
         case "simpleView":
           this.toggleSimpleView(model.get("value"))
           break;
@@ -350,7 +417,7 @@
     },
 
     uploadSound: function (e){
-      utils.tabs.create({url: utils.runtime.getURL("common/html/upload")});
+      utils.tabs.create({url: utils.runtime.getURL("common/html/upload.html")});
     },
 
     playSound  : function (e){
@@ -363,15 +430,16 @@
     initialize : function (){
       LazyRenderView.prototype.initialize.apply(this, arguments);
       this.setDefaultTab(this.collection.get("defaultTab").get("value"));
+      this.changeThemeType(this.collection.get("themeType").get("value"));
+      this.toggleSimpleView(this.collection.get("simpleView").get("value"));
+
       this.$container = this.$el.find("#settings-container");
-      this.collection.forEach(function (m){
-        this.onModelChange(m);
-      }.bind(this));
       this.listenTo(this.collection, "change", this.onModelChange);
-//      this.render();
     },
     serialize  : function (){
       var controls = [];
+      var groups = {};
+
       this.$container.find('input, select').each(function (e){
         var t = $(this),
           value,
@@ -385,7 +453,8 @@
             return;
           }
         }
-        if ( type == 'checkbox' ) {
+
+        if ( type == 'checkbox' || type == 'mcheckbox' ) {
           value = t.prop('checked');
         }
         else if ( type == 'range' ) {
@@ -394,8 +463,24 @@
         else {
           value = t.val();
         }
-        controls.push({id: controlId, value: value});
+
+        if ( t.attr("data-parent-id") ) {
+          var parentId = t.attr("data-parent-id");
+          groups[parentId] = groups[parentId] || [];
+          if ( value ) {
+            groups[parentId].push(controlId);
+          }
+        } else {
+          controls.push({id: controlId, value: value});
+        }
       });
+
+      console.log(groups);
+
+      for ( var i in groups ) {
+        controls.push({id: i, value: groups[i].join(",")});
+      }
+
       this.collection.set(controls, {add: false, remove: false});
     },
     render     : function (){
@@ -415,14 +500,14 @@
 
     unfollow: function (){
       var self = this;
-      self.showPreloader();
+      self.showPreloader(self.$el.find(".stream"));
       this.model.unfollow(function (){
         self.hidePreloader();
       });
     },
     follow  : function (){
       var self = this;
-      self.showPreloader();
+      self.showPreloader(self.$el.find(".stream"));
       self.model.follow(function (){
         self.hidePreloader();
       });
@@ -495,9 +580,11 @@
     },
     openStream: function (){
       this.model.openStream();
+      window.close();
     },
     openChat  : function (){
       this.model.openChat();
+      window.close();
     },
     showMenu  : function (e){
       var self = this;
@@ -512,12 +599,15 @@
       menu.$el
         .on('click', '.js-open-chat', function (){
           self.model.openChat();
+          window.close();
         })
         .on('click', '.js-open-in-multitwitch', function (){
           self.model.openMultitwitch();
+          window.close();
         })
         .on('click', '.js-open-stream', function (e){
           self.model.openStream($(e.target).attr("data-type"));
+          window.close();
         })
         .on('click', '.js-follow', function (){
           self.follow();
@@ -530,14 +620,14 @@
     },
     unfollow  : function (){
       var self = this;
-      self.showPreloader();
+      self.showPreloader(self.$el.find(".stream"));
       this.model.unfollow(function (){
         self.hidePreloader();
       });
     },
     follow    : function (){
       var self = this;
-      self.showPreloader();
+      self.showPreloader(self.$el.find(".stream"));
       self.model.follow(function (){
         self.hidePreloader();
       });
@@ -549,64 +639,72 @@
   });
 
   var ListView = LazyRenderView.extend({
-    template   : "screenmessage",
-    messages   : {
-      "auth"           : {
+    events        : {
+      "click .screen-msg-btn": "onMessageClick"
+    },
+    messages      : {
+      "auth"         : {
         text: "__MSG_m73__"
       },
-      "api"            : {
+      "api"          : {
         text: "__MSG_m48__"
       },
-      "nostreams"      : {
-        header: "Your Following streams tab is empty.",
-        text  : "Only live following streams will be shown here."
-      },
-      "novideo"        : {
+      "novideo"      : {
         text: "__MSG_m49__"
       },
-      "nosearchresults": {
-        text: "__MSG_m50__"
-      },
-      "nosearchquery"  : {
+      "nosearchquery": {
         text: "No search query"
-      },
-      "nofollowedgames": {
-        header: "Your Following games tab is empty.",
-        text  : "No one is streaming your favorites games now."
       }
     },
-    itemView   : null, // single item view
-    initialize : function (opts){
+    itemView      : null, // single item view
+    initialize    : function (opts){
       LazyRenderView.prototype.initialize.apply(this, arguments);
-      this.container = opts.container || this.$el.find(".screen-content");
-      this.listenTo(this.collection, "add update sort remove reset", this.render);
+      this.container = opts.container || this.$el.children(".screen-content");
+      this.messages = $.extend({}, this.messages, opts.messages);
+      this.currentMessage = null;
+      this.listenTo(this.collection, "remove update sort reset", this.render.bind(this, null));
       this.listenTo(this.collection, "_error", this.showMessage.bind(this));
-      this.listenTo(this.collection, "addarray", this.render.bind(this));
+      this.listenTo(this.collection, "add addarray", this.render.bind(this));
+      if ( opts.preloaderOnUpdate ) {
+        this.listenTo(this.collection, "update-status", function (isUpdating, opts){
+          if ( isUpdating && opts.reset ) {
+            this.container.empty().append(this.app.preloader);
+          }
+        }.bind(this));
+      }
     },
-    onunload   : function (){
-      this.collection.trigger('unload');
+    onMessageClick: function (){
+      if ( this.currentMessage.onclick ) {
+        this.currentMessage.onclick.call(this);
+      }
     },
-    showMessage: function (type){
+    showMessage   : function (type){
       if ( this.messages[type] ) {
         var text = this.messages[type];
-        this.container.empty().html(Handlebars.templates[this.template](text));
+        this.currentMessage = this.messages[type];
+        this.container.empty().html(Handlebars.templates["screenmessage"](text));
       }
     },
-    loadNext   : function (){
-      if ( this.collection.loadNext ) {
+    loadNext      : function (){
+      if ( this.collection.pagination ) {
         this.collection.loadNext();
       }
     },
-    update     : function (){
+    update        : function (){
       this.container.empty().append(this.app.preloader);
       this.collection.update();
     },
-    render     : function (models){
-      //if ( this.collection.lastErrorMessage ) {
-      //  this.container.empty();
-      //  this.showMessage(this.collection.lastErrorMessage);
-      //} else {
-      var elementsToRender = models ? models : this.collection;
+    render        : function (models){
+      var elementsToRender = [];
+      if ( models ) {
+        elementsToRender = Array.isArray(models) ? models : [models];
+      } else {
+        elementsToRender = this.collection;
+        if ( !elementsToRender.length ) {
+          return this.showMessage("noresults");
+        }
+      }
+
       var views = elementsToRender.map(function (item){
         return new this.itemView({model: item}).render().$el;
       }, this);
@@ -615,9 +713,9 @@
       } else {
         this.container.empty().html(views);
       }
-      //}
     }
   });
+
 
   var ChannelNotificationView = DefaultView.extend({
     template   : "channelnotification",
@@ -627,6 +725,21 @@
     openProfile: function (){
       this.model.openProfilePage();
     }
+  })
+
+  var ChannelView = DefaultView.extend({
+    template       : "channel",
+    events         : {
+      "click .stream": "openChannelPage"
+    },
+    openChannelPage: function (){
+      this.model.openChannelPage();
+    }
+  })
+
+
+  var FollowedChannelsView = ListView.extend({
+    itemView: ChannelView
   })
 
   var ChannelNotificationListView = ListView.extend({
@@ -702,6 +815,75 @@
     itemView: StreamView
   });
 
+  var FollowingStreamsView = StreamListView.extend({
+    events             : {
+      "click #load-offline-channels-btn": "loadOfflineChannels"
+    },
+    showOfflineChannels: false,
+    channelsCollection : null,
+    initialize         : function (opts){
+      StreamListView.prototype.initialize.apply(this, arguments);
+      _.extend(this.events, StreamListView.prototype.events);
+
+      this.$loadBtn = $('#load-offline-channels-btn');
+      this.$channels = $('#followed-channels-screen');
+      this.channelsCollection = opts.channelsCollection;
+
+      if ( app.twitchApi.isAuthorized() ) {
+        this.$loadBtn.removeClass('hide');
+      } else {
+        this.$loadBtn.addClass('hide');
+      }
+
+      this.listenTo(app.twitchApi, "authorize", function (){
+        this.$loadBtn.removeClass('hide');
+      }.bind(this));
+
+      this.listenTo(app.twitchApi, "revoke", function (){
+        this.$loadBtn.addClass('hide');
+      }.bind(this));
+
+      this.listenTo(this.collection, "update-status", function (){
+        this.$loadBtn.addClass('hide');
+        this.$channels.addClass('hide');
+      }.bind(this));
+
+      if ( !this.collection.length ) {
+        this.$loadBtn.addClass('hide');
+      }
+
+      this.listenTo(this.collection, "remove update sort reset", function (){
+        this.$loadBtn.addClass('hide');
+        if ( !this.showOfflineChannels && this.collection.length ) {
+          this.$loadBtn.removeClass('hide');
+        }
+      }.bind(this));
+
+      this.listenTo(this.collection, "update", function (){
+        this.$channels.removeClass('hide');
+      }.bind(this));
+
+      this.listenTo(this.channelsCollection, "update", function (isUpdating, opts){
+        console.log("\nUpdate status", arguments);
+        this.app.btnPreloader.detach();
+        this.$loadBtn.addClass('hide');
+      }.bind(this));
+    },
+    loadOfflineChannels: function (){
+      console.log("\nLoad offline Channels");
+      this.showOfflineChannels = true;
+      this.$loadBtn.append(this.app.btnPreloader);
+      this.channelsCollection.update();
+    }
+  })
+
+  var GameStreamsView = StreamListView.extend({
+    onhide: function (){
+      this.collection.enableLanguageFilter();
+    }
+  })
+
+
   var SearchView = ListView.extend({
     events  : {
       "keyup #searchInput": "onkeyup",
@@ -728,109 +910,41 @@
     }
   });
 
-  var ExtendedGameView = DefaultView.extend({
-    template          : "gameextended",
-    events            : {
+  var GameLobbyView = DefaultView.extend({
+    template     : "gameextended",
+    events       : {
       "click .game-follow": "follow"
     },
-    render            : function (){
-      DefaultView.prototype.render.apply(this, arguments);
-      this.toggleActiveButton(this.view);
-    },
-    setCurrentView    : function (game, view){
-      this.view = view;
-      this.toggleActiveButton(this.view);
-    },
-    toggleActiveButton: function (view){
-      var $buttons = this.$el.find(".button").removeClass("active");
-      if ( /streams$/i.exec(view) ) {
-        $buttons.eq(0).addClass("active");
-      }
+    onRouteChange: function (route, r1){
+      console.log("route", arguments);
+      var isActive = /gameStreams|gameVideos/i.test(route);
+      this.$el.toggle(isActive);
+      $("#content").toggleClass("shift", isActive);
+      if ( /gameStreams|gameVideos/i.test(route) ) {
+        var $buttons = this.$el.find(".button").removeClass("active");
 
-      if ( /videos$/i.exec(view) ) {
-        $buttons.eq(1).addClass("active");
+        if ( /gameStreams/i.exec(route) ) {
+          $buttons.eq(0).addClass("active");
+        }
+
+        if ( /gameVideos/i.exec(route) ) {
+          $buttons.eq(1).addClass("active");
+        }
+        var gameName = r1[0];
+        this.model.change(gameName);
       }
     },
-    follow            : function (){
+    follow       : function (){
       this.$el.find(".game-follow").addClass("active");
       this.model.follow();
     },
-    initialize        : function (){
+    initialize   : function (){
       DefaultView.prototype.initialize.apply(this, arguments);
-      this.listenTo(this.app.router, "route:gameLobby", this.setCurrentView.bind(this));
-    }
-  })
-
-  var GameLobbyView = DefaultView.extend({
-
-    initialize      : function (opts){
-      DefaultView.prototype.initialize.apply(this, arguments);
-      this.listenTo(this.app.router, "route:gameLobby", this.toggleActiveView.bind(this));
-      this.listenTo(this.app.router, "route", this.toggle.bind(this));
-
-      this.gameView = new ExtendedGameView({
-        el   : "#gamelobby-game",
-        model: this.model.game
-      })
-
-      this.streamView = new StreamListView({
-        el        : "#gamelobby-streams",
-        collection: b.gameLobby.streams
-      });
-
-      this.videoView = new VideoListView({
-        el        : "#gamelobby-videos",
-        collection: b.gameLobby.videos
-      })
-
-      this.gameView.render();
-      this.videoView.render();
-      this.streamView.render();
-      this.listenTo(this.model.game, "change", this.update);
-    },
-    toggle          : function (r){
-      if ( /gamelobby/i.exec(r) ) {
-        $("#content").css({top: 154});
-      } else {
-        $("#content").css({top: 31});
-      }
-    },
-    loadNext        : function (){
-      this.videoView.loadNext();
-      this.streamView.loadNext();
-    },
-    toggleActiveView: function (game, view){
-      this.$el.find(".tabs [tab-id]").hide();
-      this.$el.find(".tabs [tab-id='" + view + "']").show();
-    },
-    update          : function (){
-      this.gameView.render();
-      this.videoView.update();
-      this.streamView.update();
-    },
-    setGame         : function (game){
-      this.model.setGame(game);
-    }
-  })
-
-  var DonationView = DefaultView.extend({
-    template: "donation"
-  });
-
-  var DonationListView = DefaultView.extend({
-    initialize: function (){
-      DefaultView.prototype.initialize.apply(this, arguments);
-      this.listenTo(this.collection, "reset", this.render);
+      this.listenTo(this.model, "change", this.render.bind(this));
+      this.listenTo(this.app.router, "route", this.onRouteChange.bind(this));
       this.render();
-    },
-    render    : function (){
-      var views = this.collection.map(function (item){
-        return new DonationView({model: item}).render().$el;
-      }, this);
-
-      this.$el.empty().html(views);
     }
-  });
+  })
 
   var ContributorView = DefaultView.extend({
     template: "contributor"
@@ -850,4 +964,5 @@
       this.$el.empty().html(views);
     }
   });
+
 })(window);

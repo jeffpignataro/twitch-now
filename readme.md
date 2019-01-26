@@ -1,7 +1,7 @@
 # Twitch Now
 
 * Chrome version: https://chrome.google.com/webstore/detail/twitch-now/nlmbdmpjmlijibeockamioakdpmhjnpk
-* Firefox version: https://docs.google.com/file/d/0BykW-NfUUzm5Z2RCWmcxTmQ5cEk
+* Firefox version: https://addons.mozilla.org/firefox/addon/twitch-now/
 * Opera version: https://addons.opera.com/extensions/details/twitch-now/
 
 ## Requirements
@@ -28,7 +28,7 @@ $ gulp firefox
 
 To run Firefox version:
 ```
-$ cd builds/firefox && jpm run
+$ run firefox, goto about:debugging, then load build/firefox/manifest.json
 ```
 
 To build Opera version:

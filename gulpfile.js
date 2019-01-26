@@ -12,63 +12,42 @@ var i18n = require('./gulp-i18n.js');
 var zip = require('gulp-zip');
 var bump = require('gulp-bump');
 var fs = require('fs');
+var jshint = require('gulp-jshint');
+var request = require('request');
 
-gulp.task('clean:firefox_after', function (){
-  return del.sync([
-    'build/firefox/data/common/dist/popup.comb.css.map',
-    'build/firefox/data/common/lib/3rd/analytics.js',
-    'build/firefox/data/common/lib/analytics.js',
-    'build/firefox/data/common/lib/oauth2.js',
-    'build/firefox/data/common/lib/lytics.js',
-    'build/firefox/data/common/lib/onerror.js',
-    'build/firefox/data/common/dist/popup.comb.js',
-    'build/firefox/data/common/dist/popup.comb.js.map'
-  ])
-})
+
+gulp.task('lint', function (){
+  return gulp
+    .src([
+      './common/lib/*.js'
+    ])
+    .pipe(jshint({
+      moz          : true,
+      asi          : true,
+      maxparams    : 5,
+      maxdepth     : 4,
+      maxstatements: 35,
+      maxcomplexity: 10
+    }))
+    .pipe(jshint.reporter('default'));
+});
 
 gulp.task('copy:opera', function (){
-  var c1 = gulp
+  return gulp
     .src([
-      'build/chrome/**'
-    ])
-    .pipe(gulp.dest('build/opera/'))
-
-  var c2 = gulp
-    .src([
+      'build/chrome/**',
       'opera/**'
     ])
     .pipe(gulp.dest('build/opera/'))
-
-  return merge(c1, c2);
 })
 
+
 gulp.task('copy:firefox', function (){
-  var c1 = gulp
-    .src([
-      'common/lib/3rd/eventemitter.js',
-      'common/lib/oauth2.js'
-    ])
-    .pipe(gulp.dest('build/firefox/lib/'))
-
-  var c4 = gulp
-    .src([
-      'common/lib/3rd/eventemitter.js'
-    ])
-    .pipe(gulp.dest('build/firefox/lib/3rd/'))
-
-  var c2 = gulp
-    .src([
-      'common/**'
-    ])
-    .pipe(gulp.dest('build/firefox/data/common/'))
-
-  var c3 = gulp
-    .src([
-      'firefox/**'
-    ])
+  return gulp.src([
+    'build/chrome/**',
+    'firefox/**'
+  ])
     .pipe(gulp.dest('build/firefox/'))
-
-  return merge(c1, c2, c3, c4);
 })
 
 gulp.task('copy:chrome', function (){
@@ -138,13 +117,13 @@ gulp.task('concat:popupcss', function (){
 })
 
 
-gulp.task('stripdebug:firefox', function (){
-  gulp
+gulp.task('stripdebug', function (){
+  return gulp
     .src([
-      "build/firefox/**/*.js"
+      "build/**/*.js"
     ])
     .pipe(stripDebug())
-    .pipe(gulp.dest("build/firefox/"));
+    .pipe(gulp.dest("build/"));
 })
 
 gulp.task('clean:dist', function (){
@@ -171,10 +150,6 @@ gulp.task('clean:firefox', function (){
   ]);
 });
 
-gulp.task('compress:firefox', shell.task([
-  "cd ./build/firefox && jpm xpi && mv *.xpi ../../dist/"
-]))
-
 gulp.task('compress:chrome', function (){
   var v = JSON.parse(fs.readFileSync("package.json")).version;
 
@@ -191,6 +166,14 @@ gulp.task('compress:opera', function (){
     .pipe(gulp.dest('dist/'));
 })
 
+gulp.task('compress:firefox', function (){
+  var v = JSON.parse(fs.readFileSync("package.json")).version;
+
+  return gulp.src('build/firefox/**')
+    .pipe(zip('twitch-now-firefox-' + v + '.zip'))
+    .pipe(gulp.dest('dist/'));
+})
+
 gulp.task('handlebars', function (){
   return gulp.src('templates/*.html')
     .pipe(handlebars())
@@ -203,11 +186,20 @@ gulp.task('handlebars', function (){
     .pipe(gulp.dest('common/dist/'));
 });
 
-gulp.task('i18n', function (){
-  return gulp.src(['_locales/**/*.json'])
-    .pipe(i18n('locales.json'))
-    .pipe(gulp.dest('common/dist/'));
-});
+gulp.task('contributors', function (cb){
+  request({
+    method : "GET",
+    url    : "https://api.github.com/repos/ndragomirov/twitch-now/contributors",
+    headers: {
+      "User-Agent": "whatever"
+    }
+  }, function (err, res, body){
+    if ( err || !body ) {
+      return cb(err || new Error("No body"));
+    }
+    fs.writeFile("common/dist/contributors.js", 'var contributorList = ' + body + ';', cb)
+  })
+})
 
 gulp.task('bump', function (){
   gulp
@@ -215,7 +207,7 @@ gulp.task('bump', function (){
       './package.json',
       './chrome/manifest.json',
       './opera/manifest.json',
-      './firefox/package.json'
+      './firefox/manifest.json'
     ])
     .pipe(bump())
     .pipe(gulp.dest(function (d){
@@ -223,27 +215,21 @@ gulp.task('bump', function (){
     }));
 });
 
+gulp.task('watch', function (){
+  gulp.watch(["common/**", "templates/**"], ['chrome']);
+})
+
 gulp.task('chrome', function (cb){
   runSequence(
     'clean:chrome',
-    ['handlebars', 'concat:popupcss', 'concat:popupjs'],
+    'handlebars',
+    'contributors',
+    'concat:popupcss',
+    'concat:popupjs',
     'copy:chrome',
     cb
   );
 })
-
-gulp.task('firefox', function (cb){
-  runSequence(
-    'clean:firefox',
-    'concat:popupcss',
-    'i18n',
-    'handlebars',
-    'copy:firefox',
-    'stripdebug:firefox',
-    'clean:firefox_after',
-    cb
-  )
-});
 
 gulp.task('opera', function (cb){
   runSequence(
@@ -254,12 +240,23 @@ gulp.task('opera', function (cb){
   );
 });
 
+
+gulp.task('firefox', function (cb){
+  runSequence(
+    'chrome',
+    'clean:firefox',
+    'copy:firefox',
+    cb
+  );
+});
+
 gulp.task('dist', function (cb){
   runSequence(
     ['bump', 'clean:dist'],
     'chrome',
     'opera',
     'firefox',
+    'stripdebug',
     ['compress:chrome', 'compress:opera', 'compress:firefox'],
     cb);
 })
